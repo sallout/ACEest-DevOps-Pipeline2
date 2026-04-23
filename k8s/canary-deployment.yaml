@@ -1,0 +1,32 @@
+# To execute a canary deployment, apply this alongside the main deployment.
+# It uses the same selector label 'app: aceest-fitness' but a new version.
+# Service traffic will naturally split based on the replica ratio.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aceest-api-canary
+  labels:
+    app: aceest-fitness
+    tier: backend
+    track: canary
+spec:
+  replicas: 1  # 25% traffic if main deployment has 3 replicas
+  selector:
+    matchLabels:
+      app: aceest-fitness
+  template:
+    metadata:
+      labels:
+        app: aceest-fitness
+        track: canary
+        version: "NEW_VERSION_TAG"
+    spec:
+      containers:
+      - name: aceest-api
+        image: docker.io/aceest/fitness-api:NEW_VERSION_TAG
+        ports:
+        - containerPort: 5000
+        readinessProbe:
+          httpGet:
+            path: /
+            port: 5000

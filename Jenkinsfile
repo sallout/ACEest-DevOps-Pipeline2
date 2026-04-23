@@ -16,7 +16,7 @@ pipeline {
             }
         }
 
-        stage('Setup Environment & Install Dependencies') {
+        stage('Setup Environment') {
             steps {
                 sh '''
                     python3 -m venv venv
@@ -26,7 +26,7 @@ pipeline {
             }
         }
 
-        stage('Unit Testing & Coverage') {
+        stage('Unit Testing') {
             steps {
                 sh '''
                     . venv/bin/activate
@@ -56,7 +56,7 @@ pipeline {
 
         stage('Quality Gate Check') {
             steps {
-                timeout(time: 10, unit: 'MINUTES') {
+                timeout(time: 5, unit: 'MINUTES') {
                     waitForQualityGate abortPipeline: true
                 }
             }
@@ -65,7 +65,7 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 script {
-                    dockerImage = docker.build("${DOCKER_IMAGE}:${APP_VERSION}", "--build-arg APP_VERSION=${APP_VERSION} .")
+                    dockerImage = docker.build("${DOCKER_IMAGE}:${APP_VERSION}")
                 }
             }
         }
@@ -85,15 +85,10 @@ pipeline {
             steps {
                 withKubeConfig([credentialsId: "${KUBECONFIG_CREDENTIALS_ID}"]) {
                     sh '''
-                        # Update deployment with the new image tag
-                        sed -i "s|IMAGE_TAG_PLACEHOLDER|${APP_VERSION}|g" k8s/deployment.yaml
-                        
-                        # Apply manifests
+                        sed -i "s|IMAGE_TAG_PLACEHOLDER|${DOCKER_IMAGE}:${APP_VERSION}|g" k8s/deployment.yaml
                         kubectl apply -f k8s/deployment.yaml
                         kubectl apply -f k8s/service.yaml
-                        
-                        # Verify deployment health
-                        kubectl rollout status deployment/aceest-api-deployment
+                        kubectl rollout status deployment/aceest-api-deployment --timeout=60s
                     '''
                 }
             }
@@ -102,10 +97,10 @@ pipeline {
 
     post {
         success {
-            echo "Pipeline completed successfully. Version ${APP_VERSION} deployed."
+            echo "Pipeline successful. Deployed version ${APP_VERSION}"
         }
         failure {
-            echo "Pipeline failed. Check logs and investigate."
+            echo "Pipeline failed."
         }
     }
 }

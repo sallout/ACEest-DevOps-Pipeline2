@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aceest-api-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: aceest-fitness
+  template:
+    metadata:
+      labels:
+        app: aceest-fitness
+    spec:
+      containers:
+      - name: fitness-api
+        image: IMAGE_TAG_PLACEHOLDER
+        ports:
+        - containerPort: 5000

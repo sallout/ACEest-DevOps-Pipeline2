@@ -3,7 +3,7 @@ pipeline {
 
     environment {
         DOCKER_CREDENTIALS_ID = 'dockerhub-credentials'
-        DOCKER_IMAGE = 'aceest/fitness-api'
+        DOCKER_IMAGE = 'sallout/fitness-api'
         SONAR_CREDENTIALS_ID = 'sonar-token'
         KUBECONFIG_CREDENTIALS_ID = 'k8s-config'
         APP_VERSION = "1.0.${BUILD_NUMBER}"

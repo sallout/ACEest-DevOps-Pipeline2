@@ -40,15 +40,16 @@ pipeline {
             }
         }
 
-        stage('SonarQube Quality Analysis') {
+        stage('SonarQube Analysis') {
             steps {
-                withSonarQubeEnv('SonarQubeServer') {
-                    sh '''
-                        sonar-scanner \
-                        -Dsonar.projectKey=aceest-fitness \
-                        -Dsonar.sources=. \
-                        -Dsonar.python.coverage.reportPaths=coverage.xml
-                    '''
+                script {
+                    def scannerHome = tool 'sonar-scanner'
+                    withSonarQubeEnv('SonarQubeServer') {
+                        sh "${scannerHome}/bin/sonar-scanner \
+                            -Dsonar.projectKey=aceest-fitness \
+                            -Dsonar.sources=. \
+                            -Dsonar.python.coverage.reportPaths=coverage.xml"
+                    }
                 }
             }
         }

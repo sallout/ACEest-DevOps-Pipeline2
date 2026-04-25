@@ -51,20 +51,18 @@ pipeline {
         stage('Build Docker Image') {
             steps {
                 echo 'Building Docker Image...'
-                script {
-                    dockerImage = docker.build("${IMAGE_NAME}:${env.BUILD_ID}")
-                }
+                sh "docker build -t ${IMAGE_NAME}:${env.BUILD_ID} ."
+                sh "docker tag ${IMAGE_NAME}:${env.BUILD_ID} ${IMAGE_NAME}:latest"
             }
         }
 
         stage('Push to Docker Hub') {
             steps {
                 echo 'Pushing image to registry...'
-                script {
-                    docker.withRegistry('https://index.docker.io/v1/', DOCKER_HUB_CRED) {
-                        dockerImage.push()
-                        dockerImage.push('latest')
-                    }
+                withCredentials([usernamePassword(credentialsId: DOCKER_HUB_CRED, passwordVariable: 'DOCKER_PASSWORD', usernameVariable: 'DOCKER_USERNAME')]) {
+                    sh 'echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin'
+                    sh "docker push ${IMAGE_NAME}:${env.BUILD_ID}"
+                    sh "docker push ${IMAGE_NAME}:latest"
                 }
             }
         }

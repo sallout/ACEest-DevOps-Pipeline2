@@ -1,45 +1,53 @@
+import os
 import pytest
-from app import app, clients
+from app import app, init_db
 
 @pytest.fixture
 def client():
+    """Setup a test client and an isolated test database."""
     app.config['TESTING'] = True
+    
+    # Isolate database for tests
+    import app as my_app
+    original_db = my_app.DB_NAME
+    my_app.DB_NAME = "test_aceest.db"
+    
     with app.test_client() as client:
-        # Reset state before each test
-        clients.clear()
+        with app.app_context():
+            init_db()
         yield client
+        
+    # Cleanup after tests
+    if os.path.exists("test_aceest.db"):
+        os.remove("test_aceest.db")
+    my_app.DB_NAME = original_db
 
 def test_health_check(client):
-    response = client.get('/')
+    """Test the readiness probe endpoint."""
+    response = client.get('/health')
     assert response.status_code == 200
-    assert b"ACEest Fitness API" in response.data
+    assert response.json == {"status": "healthy"}
 
-def test_get_programs(client):
-    response = client.get('/programs')
-    assert response.status_code == 200
-    data = response.get_json()
-    assert "Fat Loss (FL)" in data['data']
-
-def test_register_client_success(client):
+def test_create_and_get_client(client):
+    """Test the core client creation and retrieval flow."""
     payload = {
-        "name": "Alex",
-        "program": "Beginner (BG)",
-        "weight": 70
+        "name": "John Doe",
+        "age": 28,
+        "weight": 80.5,
+        "program": "Muscle Gain (MG)",
+        "calories": 2800
     }
-    response = client.post('/clients', json=payload)
-    assert response.status_code == 201
-    data = response.get_json()
-    assert data['data']['name'] == "Alex"
-    assert data['data']['target_calories'] == 70 * 26
-
-def test_register_client_missing_fields(client):
-    payload = {"name": "Alex"}
-    response = client.post('/clients', json=payload)
-    assert response.status_code == 400
-    assert b"Name and program are required" in response.data
-
-def test_register_client_invalid_program(client):
-    payload = {"name": "Alex", "program": "Advanced (ADV)"}
-    response = client.post('/clients', json=payload)
-    assert response.status_code == 400
-    assert b"Invalid program selected" in response.data
+    
+    # Test creation
+    post_res = client.post('/api/clients', json=payload)
+    assert post_res.status_code == 201
+    
+    # Prevent duplicate creation
+    dup_res = client.post('/api/clients', json=payload)
+    assert dup_res.status_code == 409
+    
+    # Test retrieval
+    get_res = client.get('/api/clients')
+    assert get_res.status_code == 200
+    assert len(get_res.json) == 1
+    assert get_res.json[0]["name"] == "John Doe"

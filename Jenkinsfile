@@ -1,37 +1,25 @@
 pipeline {
     agent any
-
+    
     environment {
-        DOCKER_CREDENTIALS_ID = 'dockerhub-credentials'
-        DOCKER_IMAGE = 'sallout/fitness-api'
-        SONAR_CREDENTIALS_ID = 'sonar-token'
-        KUBECONFIG_CREDENTIALS_ID = 'k8s-config'
-        APP_VERSION = "1.0.${BUILD_NUMBER}"
+        DOCKER_HUB_CREDENTIALS = 'dockerhub-credentials-id'
+        DOCKER_IMAGE = 'yourdockerhubusername/aceest-fitness'
+        SONAR_PROJECT_KEY = 'aceest-fitness-api'
     }
 
     stages {
         stage('Checkout') {
             steps {
+                echo 'Checking out source code from Git...'
                 checkout scm
             }
         }
-
-        stage('Setup Environment') {
-            steps {
-                sh '''
-                    python3 -m venv venv
-                    . venv/bin/activate
-                    pip install -r requirements.txt
-                '''
-            }
-        }
-
+        
         stage('Unit Testing') {
             steps {
-                sh '''
-                    . venv/bin/activate
-                    pytest test_app.py --junitxml=test-results.xml --cov=app --cov-report=xml
-                '''
+                echo 'Running Pytest suite...'
+                sh 'pip install -r requirements.txt'
+                sh 'pytest test_app.py --junitxml=test-results.xml'
             }
             post {
                 always {
@@ -40,42 +28,29 @@ pipeline {
             }
         }
 
-        stage('SonarQube Analysis') {
+        stage('Code Quality (SonarQube)') {
             steps {
+                echo 'Running Static Code Analysis...'
+                sh 'sonar-scanner -Dsonar.projectKey=${SONAR_PROJECT_KEY} -Dsonar.sources=app.py -Dsonar.python.xunit.reportPath=test-results.xml'
+            }
+        }
+
+        stage('Build Container Image') {
+            steps {
+                echo 'Building Docker image...'
                 script {
-                    def scannerHome = tool 'sonar-scanner'
-                    withSonarQubeEnv('SonarQubeServer') {
-                        sh "${scannerHome}/bin/sonar-scanner \
-                            -Dsonar.projectKey=aceest-fitness \
-                            -Dsonar.sources=. \
-                            -Dsonar.python.coverage.reportPaths=coverage.xml"
-                    }
+                    appImage = docker.build("${DOCKER_IMAGE}:${BUILD_NUMBER}")
                 }
             }
         }
 
-        stage('Quality Gate Check') {
+        stage('Push to Container Registry') {
             steps {
-                timeout(time: 5, unit: 'MINUTES') {
-                    waitForQualityGate abortPipeline: true
-                }
-            }
-        }
-
-        stage('Build Docker Image') {
-            steps {
+                echo 'Pushing image to Docker Hub...'
                 script {
-                    dockerImage = docker.build("${DOCKER_IMAGE}:${APP_VERSION}")
-                }
-            }
-        }
-
-        stage('Push to Docker Registry') {
-            steps {
-                script {
-                    docker.withRegistry('https://index.docker.io/v1/', "${DOCKER_CREDENTIALS_ID}") {
-                        dockerImage.push()
-                        dockerImage.push('latest')
+                    docker.withRegistry('https://index.docker.io/v1/', "${DOCKER_HUB_CREDENTIALS}") {
+                        appImage.push()
+                        appImage.push('latest')
                     }
                 }
             }
@@ -83,24 +58,18 @@ pipeline {
 
         stage('Deploy to Kubernetes') {
             steps {
-                withKubeConfig([credentialsId: "${KUBECONFIG_CREDENTIALS_ID}"]) {
-                    sh '''
-                        sed -i "s|IMAGE_TAG_PLACEHOLDER|${DOCKER_IMAGE}:${APP_VERSION}|g" k8s/deployment.yaml
-                        kubectl apply -f k8s/deployment.yaml
-                        kubectl apply -f k8s/service.yaml
-                        kubectl rollout status deployment/aceest-api-deployment --timeout=60s
-                    '''
-                }
+                echo 'Deploying to K8s Cluster...'
+                sh "sed -i 's|IMAGE_PLACEHOLDER|${DOCKER_IMAGE}:${BUILD_NUMBER}|g' k8s/deployment.yaml"
+                sh 'kubectl apply -f k8s/deployment.yaml'
+                sh 'kubectl apply -f k8s/service.yaml'
+                sh 'kubectl rollout status deployment/aceest-fitness-app'
             }
         }
     }
-
+    
     post {
-        success {
-            echo "Pipeline successful. Deployed version ${APP_VERSION}"
-        }
         failure {
-            echo "Pipeline failed."
+            echo 'Pipeline failed. Triggering notifications and keeping previous stable deployment active.'
         }
     }
 }

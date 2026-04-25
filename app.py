@@ -1,64 +1,93 @@
-from flask import Flask, jsonify, request
-import os
+import sqlite3
+from flask import Flask, request, jsonify
 
 app = Flask(__name__)
+DB_NAME = "aceest_fitness.db"
 
-# In-memory store representing the database for cloud-native statelessness
-clients = []
+def init_db():
+    """Initialize the SQLite database mirroring Aceestver-3.2.4.py schema."""
+    with sqlite3.connect(DB_NAME) as conn:
+        cur = conn.cursor()
+        
+        # Users (for role-based login)
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                username TEXT PRIMARY KEY,
+                password TEXT,
+                role TEXT
+            )
+        """)
+        
+        # Clients
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS clients (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE,
+                age INTEGER,
+                height REAL,
+                weight REAL,
+                program TEXT,
+                calories INTEGER,
+                target_weight REAL,
+                target_adherence INTEGER,
+                membership_status TEXT,
+                membership_end TEXT
+            )
+        """)
+        
+        # Add default admin if not exists
+        cur.execute("SELECT * FROM users WHERE username='admin'")
+        if not cur.fetchone():
+            cur.execute("INSERT INTO users VALUES ('admin','admin','Admin')")
+        
+        conn.commit()
 
-programs = {
-    "Fat Loss (FL)": {"factor": 22, "desc": "3-day full-body fat loss"},
-    "Muscle Gain (MG)": {"factor": 35, "desc": "Push/Pull/Legs hypertrophy"},
-    "Beginner (BG)": {"factor": 26, "desc": "3-day simple beginner full-body"}
-}
-
-@app.route('/', methods=['GET'])
+@app.route('/health', methods=['GET'])
 def health_check():
-    """Health check endpoint for Kubernetes probes."""
-    return jsonify({
-        "status": "healthy",
-        "message": "ACEest Fitness API v1.0 running",
-        "version": os.getenv("APP_VERSION", "1.0.0")
-    }), 200
+    """Health check endpoint for Kubernetes readiness probes."""
+    return jsonify({"status": "healthy"}), 200
 
-@app.route('/programs', methods=['GET'])
-def get_programs():
-    """Retrieve available fitness programs."""
-    return jsonify({"status": "success", "data": programs}), 200
-
-@app.route('/clients', methods=['POST'])
-def register_client():
-    """Register a new gym client."""
+@app.route('/api/login', methods=['POST'])
+def login():
+    """Authenticate user based on users table."""
     data = request.get_json()
+    username = data.get('username')
+    password = data.get('password')
     
-    if not data or 'name' not in data or 'program' not in data:
-        return jsonify({"status": "error", "message": "Name and program are required"}), 400
+    with sqlite3.connect(DB_NAME) as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT role FROM users WHERE username=? AND password=?", (username, password))
+        row = cur.fetchone()
         
-    name = data['name']
-    program = data['program']
-    weight = data.get('weight', 0)
-    
-    if program not in programs:
-        return jsonify({"status": "error", "message": "Invalid program selected"}), 400
-        
-    calories = int(weight * programs[program]['factor']) if weight > 0 else 0
-    
-    new_client = {
-        "id": len(clients) + 1,
-        "name": name,
-        "program": program,
-        "weight": weight,
-        "target_calories": calories
-    }
-    
-    clients.append(new_client)
-    return jsonify({"status": "success", "data": new_client}), 201
+    if row:
+        return jsonify({"message": "Login successful", "role": row[0]}), 200
+    return jsonify({"error": "Invalid credentials"}), 401
 
-@app.route('/clients', methods=['GET'])
-def get_clients():
-    """Retrieve all registered clients."""
-    return jsonify({"status": "success", "data": clients}), 200
+@app.route('/api/clients', methods=['GET', 'POST'])
+def handle_clients():
+    """Retrieve all clients or create a new client."""
+    if request.method == 'GET':
+        with sqlite3.connect(DB_NAME) as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT id, name, program, membership_status FROM clients")
+            clients = [{"id": r[0], "name": r[1], "program": r[2], "status": r[3]} for r in cur.fetchall()]
+        return jsonify(clients), 200
+
+    if request.method == 'POST':
+        data = request.get_json()
+        name = data.get('name')
+        if not name:
+            return jsonify({"error": "Name is required"}), 400
+            
+        try:
+            with sqlite3.connect(DB_NAME) as conn:
+                cur = conn.cursor()
+                cur.execute("INSERT INTO clients (name, membership_status) VALUES (?, ?)", (name, "Active"))
+                conn.commit()
+            return jsonify({"message": f"Client {name} created"}), 201
+        except sqlite3.IntegrityError:
+            return jsonify({"error": "Client already exists"}), 409
 
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port)
+    init_db()
+    app.run(host='0.0.0.0', port=5000, debug=True)

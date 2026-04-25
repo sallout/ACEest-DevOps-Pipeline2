@@ -17,8 +17,13 @@ pipeline {
         stage('Unit Testing') {
             steps {
                 echo 'Running Pytest...'
-                sh 'pip install -r requirements.txt'
-                sh 'pytest test_app.py --junitxml=test-results.xml'
+                // Using a virtual environment to safely install packages
+                sh '''
+                    python3 -m venv venv
+                    . venv/bin/activate
+                    pip install -r requirements.txt
+                    pytest test_app.py --junitxml=test-results.xml
+                '''
             }
             post {
                 always {

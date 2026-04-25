@@ -1,10 +1,9 @@
 pipeline {
     agent any
-    
+
     environment {
-        DOCKER_HUB_CREDENTIALS = 'dockerhub-credentials-id'
-        DOCKER_IMAGE = 'yourdockerhubusername/aceest-fitness'
-        SONAR_PROJECT_KEY = 'aceest-fitness-api'
+        DOCKER_HUB_CRED = 'dockerhub-credentials' 
+        IMAGE_NAME = 'sallout/aceest-fitness'
     }
 
     stages {
@@ -14,10 +13,10 @@ pipeline {
                 checkout scm
             }
         }
-        
+
         stage('Unit Testing') {
             steps {
-                echo 'Running Pytest suite...'
+                echo 'Running Pytest...'
                 sh 'pip install -r requirements.txt'
                 sh 'pytest test_app.py --junitxml=test-results.xml'
             }
@@ -28,29 +27,34 @@ pipeline {
             }
         }
 
-        stage('Code Quality (SonarQube)') {
+        stage('SonarQube Analysis') {
             steps {
                 echo 'Running Static Code Analysis...'
-                sh 'sonar-scanner -Dsonar.projectKey=${SONAR_PROJECT_KEY} -Dsonar.sources=app.py -Dsonar.python.xunit.reportPath=test-results.xml'
-            }
-        }
-
-        stage('Build Container Image') {
-            steps {
-                echo 'Building Docker image...'
                 script {
-                    appImage = docker.build("${DOCKER_IMAGE}:${BUILD_NUMBER}")
+                    def scannerHome = tool 'sonar-scanner'
+                    withSonarQubeEnv('sonar-server') {
+                        sh "${scannerHome}/bin/sonar-scanner -Dsonar.projectKey=aceest-fitness -Dsonar.sources=. -Dsonar.python.xunit.reportPath=test-results.xml"
+                    }
                 }
             }
         }
 
-        stage('Push to Container Registry') {
+        stage('Build Docker Image') {
             steps {
-                echo 'Pushing image to Docker Hub...'
+                echo 'Building Docker Image...'
                 script {
-                    docker.withRegistry('https://index.docker.io/v1/', "${DOCKER_HUB_CREDENTIALS}") {
-                        appImage.push()
-                        appImage.push('latest')
+                    dockerImage = docker.build("${IMAGE_NAME}:${env.BUILD_ID}")
+                }
+            }
+        }
+
+        stage('Push to Docker Hub') {
+            steps {
+                echo 'Pushing image to registry...'
+                script {
+                    docker.withRegistry('https://index.docker.io/v1/', DOCKER_HUB_CRED) {
+                        dockerImage.push()
+                        dockerImage.push('latest')
                     }
                 }
             }
@@ -58,18 +62,13 @@ pipeline {
 
         stage('Deploy to Kubernetes') {
             steps {
-                echo 'Deploying to K8s Cluster...'
-                sh "sed -i 's|IMAGE_PLACEHOLDER|${DOCKER_IMAGE}:${BUILD_NUMBER}|g' k8s/deployment.yaml"
+                echo 'Deploying Rolling Update to K8s...'
+                sh "sed -i 's|IMAGE_PLACEHOLDER|${env.BUILD_ID}|g' k8s/deployment.yaml"
                 sh 'kubectl apply -f k8s/deployment.yaml'
                 sh 'kubectl apply -f k8s/service.yaml'
+                
                 sh 'kubectl rollout status deployment/aceest-fitness-app'
             }
-        }
-    }
-    
-    post {
-        failure {
-            echo 'Pipeline failed. Triggering notifications and keeping previous stable deployment active.'
         }
     }
 }

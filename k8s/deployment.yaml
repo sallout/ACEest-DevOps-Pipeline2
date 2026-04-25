@@ -21,7 +21,7 @@ spec:
     spec:
       containers:
       - name: aceest-fitness
-        image: IMAGE_PLACEHOLDER  
+        image: sallout/aceest-fitness:IMAGE_PLACEHOLDER
         imagePullPolicy: Always
         ports:
         - containerPort: 5000
